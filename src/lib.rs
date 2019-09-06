@@ -9,15 +9,18 @@ use std::cmp::min;
 pub enum Alphabet {
     RFC4648 { padding: bool },
     Crockford,
+    ZBase32,
 }
 
 const RFC4648_ALPHABET: &'static [u8]   = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const CROCKFORD_ALPHABET: &'static [u8] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const ZBASE32_ALPHABET: &'static [u8] = b"ybndrfg8ejkmcpqxot1uwisza345h769";
 
 pub fn encode(alphabet: Alphabet, data: &[u8]) -> String {
     let (alphabet, padding) = match alphabet {
         Alphabet::RFC4648 { padding } => (RFC4648_ALPHABET, padding),
         Alphabet::Crockford => (CROCKFORD_ALPHABET, false),
+        Alphabet::ZBase32 => (ZBASE32_ALPHABET, false),
     };
     let mut ret = Vec::with_capacity((data.len()+3)/4*5);
 
@@ -56,6 +59,7 @@ pub fn encode(alphabet: Alphabet, data: &[u8]) -> String {
 
 const RFC4648_INV_ALPHABET: [i8; 43] = [-1, -1, 26, 27, 28, 29, 30, 31, -1, -1, -1, -1, -1, 0, -1, -1, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25];
 const CROCKFORD_INV_ALPHABET: [i8; 43] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, -1, -1, -1, -1, -1, -1, -1, 10, 11, 12, 13, 14, 15, 16, 17, 1, 18, 19, 1, 20, 21, 0, 22, 23, 24, 25, 26, -1, 27, 28, 29, 30, 31];
+const ZBASE32_INV_ALPHABET: [i8; 43] = [-1, 18, -1, 25, 26, 27, 30, 29, 7, 31, -1, -1, -1, -1, -1, -1, -1, 24, 1, 12, 3, 8, 5, 6, 28, 21, 9, 10, -1, 11, 2, 16, 13, 14, 4, 22, 17, 19, -1, 20, 15, 0, 23];
 
 pub fn decode(alphabet: Alphabet, data: &str) -> Option<Vec<u8>> {
     if !data.is_ascii() {
@@ -64,7 +68,8 @@ pub fn decode(alphabet: Alphabet, data: &str) -> Option<Vec<u8>> {
     let data = data.as_bytes();
     let alphabet = match alphabet {
         Alphabet::RFC4648 {..} => RFC4648_INV_ALPHABET,
-        Alphabet::Crockford => CROCKFORD_INV_ALPHABET
+        Alphabet::Crockford => CROCKFORD_INV_ALPHABET,
+        Alphabet::ZBase32 => ZBASE32_INV_ALPHABET,
     };
     let mut unpadded_data_length = data.len();
     for i in 1..min(6, data.len())+1 {
@@ -100,7 +105,7 @@ pub fn decode(alphabet: Alphabet, data: &str) -> Option<Vec<u8>> {
 #[allow(dead_code, unused_attributes)]
 mod test {
     use super::{encode, decode};
-    use super::Alphabet::{Crockford, RFC4648};
+    use super::Alphabet::{Crockford, RFC4648, ZBase32};
     use quickcheck;
     use std;
     use rand::Rng;
@@ -152,6 +157,15 @@ mod test {
     }
 
     #[test]
+    fn masks_zbase32() {
+        assert_eq!(encode(ZBase32, &[0xF8, 0x3E, 0x7F, 0x83, 0xE7]), "9y989y98");
+        assert_eq!(encode(ZBase32, &[0x77, 0xC1, 0xF7, 0x7C, 0x1F]), "q9y9q9y9");
+        assert_eq!(decode(ZBase32, "9y989y98").unwrap(), [0xF8, 0x3E, 0x7F, 0x83, 0xE7]);
+        assert_eq!(decode(ZBase32, "q9y9q9y9").unwrap(), [0x77, 0xC1, 0xF7, 0x7C, 0x1F]);
+        assert_eq!(encode(ZBase32, &[0xF8, 0x3E, 0x7F, 0x83]), "9y989ya");
+    }
+
+    #[test]
     fn padding() {
         let num_padding = [0, 6, 4, 3, 1];
         for i in 1..6 {
@@ -188,6 +202,13 @@ mod test {
         }
         quickcheck::quickcheck(test as fn(Vec<u8>) -> bool)
     }
+    #[test]
+    fn invertible_zbase32() {
+        fn test(data: Vec<u8>) -> bool {
+            decode(ZBase32, encode(ZBase32, data.as_ref()).as_ref()).unwrap() == data
+        }
+        quickcheck::quickcheck(test as fn(Vec<u8>) -> bool)
+    }
 
     #[test]
     fn lower_case() {
@@ -217,5 +238,10 @@ mod test {
     #[test]
     fn invalid_chars_unpadded_rfc4648() {
         assert_eq!(decode(RFC4648 { padding: false }, ","), None)
+    }
+
+    #[test]
+    fn invalid_chars_zbase32() {
+        assert_eq!(decode(ZBase32, ","), None)
     }
 }
